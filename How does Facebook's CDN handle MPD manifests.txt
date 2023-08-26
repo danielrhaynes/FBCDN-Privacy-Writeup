@@ -1,0 +1,57 @@
+I noticed that I could access Facebook Content Delivery Network (fbcdn) images from the raw hosting url without being logged in to the account that I used to send the message with that attatchment. Specifically not the ...messenger_media?attachment_id=... URL - that one is tied to a specific conversation, and therefore is behind a login - but the fbcdn.net URL that serves the content to the Messenger web page. Since theoretically anything you've sent off to be hosted on Facebook's CDN is publically available, this got me wondering how effectively you could trawl through their hosted media by just incrementing the URL.
+
+Here's one of the cdn links:
+
+https://scontent.xx.fbcdn.net/v/t1.15752-9/332594097_1331889990999394_6217248767342971006_n.jpg?stp=dst-jpg_s403x403&_nc_cat=101&ccb=1-7&_nc_sid=aee45a&_nc_ohc=gHSi6EV1PHUAX9CVgUc&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&oh=03_AdSL1nmf6oBIqs-6neEnkQaml3Zv7KrNzDiaaxeJQz5Fug&oe=64612BDF
+
+Just to begin, I cross referenced this with the in-chat URL to see if I saw any common elements, and there don't appear to be any - the "attachment_id=774517840642297" in the messenger_media URL doesn't seem to crop up in the CDN URL anywhere. I don't think even if it did that would be a very consequential data point, aside from the attatchment_id being a relatively short, easier to increment value - although viewing other messenger_media URLs, attachment IDs are non-sequential, so if you were searching for something uploaded by a specific person starting from an attachment_id that you were confident belonged to something uploaded by them, this wouldn't do you any good anyway. Not to mention that these URLs are associated with your specific account, and so even in the case that they were, you would still be better off just using the UI to find media as normal.
+
+Moving on to something different.
+
+After doing some reading, the bulk of the URL seems to be part of something called a Media Presentation Description (MPD) manifest. This is for use in something called DASH (dynamic adaptive streaming over HTTP), which is an ISO standard for how to serve adaptive media - that is, media that the client can request in different formats/resolutions/bitrates/etc, as opposed to static media.
+
+That explains why Facebook has a different subdomain on its CDN called static, in addition to the scontent one. Not sure what the s is, maybe "scalable."
+
+This leads to the obvious thought "can I change that dst-jpg conversion query to output arbitrary resolutions?"
+
+The answer is "no."
+
+Making arbitrary changes to the URL results in a signature error. Initially I thought that the signature might have been part of the URL itself as just some sort of basic integrity check, but after looking into the DASH standard and MPD files, no part of the URL is unaccounted for; initially thought that the "6neEnkQaml3Zv7KrNzDiaaxeJQz5Fug" might have been a hash, or part of one, but that doesn't seem to be the case, and it seems more likely to me that the CDN generates a signature for URLs that are responses to valid API requests and stores them in a private database that it references against incoming URLs to see if they're ones that it has issued and signed off on historically. I assume this is to prevent completely arbitrary requests from non-API queries.
+
+Okay, back to MPDs for a minute.
+
+Via the Mozilla developer web docs for MDPs(https://developer.mozilla.org/en-US/docs/Web/Guide/Audio_and_video_delivery/Setting_up_adaptive_streaming_media_sources):
+
+"A media presentation description (MPD) file is used to hold the information on the various streams and the bandwidths they are associated with. In your video source (src) attribute you point to the MPD instead of to the media file as you would with non-adaptive media."
+
+That makes it seem like if I look in the HTML of the page, where I should see a .jpg source for the images in Messenger chats, I should instead see a reference to an MPD file.
+
+Let's go check and see if that's the case.
+
+Okay, after much screwing around and getting confused because the way that firefox's HTML inspector informs you that it has truncated a long string is visually almost indistinguishable from regular underscores, no, the src url in the img HTML elements does not point to an MPD manifest. The URL does however resemble examples of other MPD entries that I can find, and so I assume that the specific items on the manifest that I am being served is just something that gets negotiated prior to my machine being served the HTML, and that the manifest is for backend use only, and that the client doesn't actually directly determine over DASH which item to retrieve.
+
+As for the original question "how easy is it to trawl Facebook's CDN by incrimenting URLs?"
+
+Well, comparing a couple of these CDN URLs, no part of them is sequential, it would seem, so that takes a big bite out of your ability to find something from a specific user, but what about just random hits? Let's compare a couple of CDN URLs:
+
+33259409713318899909993946217248767342971006101gHSi6EV1PHUAX9n2hXKAdSnVmrp5NjrTd8_pYLaQnxodW04MfDAN6xuiM5gzDbnEQ6461641F
+
+34100861673320645178307027723994537075856741041-73l4c_fpKw8kAX_hFPGlAdTPUXnsGSdy7g2G2VSTPwUQelySIygT-W32EBQPQZKAF64619E1A
+
+These two URLs have been stripped of all of their identical parts so as to identify what our working set of data actually is, and which parts are boilerplate that don't change from URL to URL. For the purposes of calculating a ballpark number of total possible configurations I'm splitting the strings into two groups - the part comprised entirely of digits, and the part comprised more broadly of digits, uppercase letters, and lowercase letters, hyphens, and underscores. Working from the first URL, that would be:
+
+3325 9409 7133 1889 9909 9939 4621 7248 7673 4297 1006 101
+
+and 
+
+gHSi 6EV1 PHUA X9n2 hXKA dSnV mrp5 NjrT d8_p YLaQ nxod W04M fDAN 6xui M5gz DbnE Q646 1641 F
+
+10 possible states per character in group 1, assuming 64 possible states in group 2. 47 characters in group 1, 73 in group 2. That means that for just attempting to brute force URL combinations, there are 10^47*64^73 possible combinations of URLs you would have as your domain size - that's something like a 1 with over 200 zeroes after it - an unknowable subset of which will actually result in anything but a signature error.
+
+Basically, it makes infinitely more sense to worry about a plain old data breach or account comprimise than the idea that someone just trawling URL combinations is ever going to find anything useful on Facebook's CDN.
+
+So here's the point at which I freed myself from the "coming to my own conclusions" shackles and actually went to see what other people think of this, and after reading this thread I'm patting myself on the back for not falling into the trap of noticing this and immediately assuming that Facebook had some massive security hole that somehow only I had noticed.
+
+There are some interesting points that I didn't quite think of, which are the specific privacy concerns with token-protected media access URLs, and ones like Facebook uses where the token just is the URL itself, like ability to revoke access at a later date not being a thing, and how for something like Facebook where other people have every oppertunity to remove the media from Facebook's control by doing anything from inadvertently caching it, to right-click saving it on purpose and rehosting it somewhere else, to visiting the resource URL specifically rather than just seeing it as an embed and the tokenized URL entering their browser history, and so the added complexity of a seperate token access system just doesn't make any sense and would only lead to a false sense of security when people eventually went to revoke access to an image that someone will have invariably saved externally during the duration that they did have token access to it.
+
+Additionally, at least one person thought to put the CDN's URL into Google Images and was aghast when a bunch of random peoples' images came up, but again, that's not a case of a massive hole in Facebook's data security. People take the links to those CDN images and embed them other places because hey, free hosting, and so Google has some of them indexed, but only ones that people have gone off and embedded in other places. Realistically, the fact that the specific method they used to embed it - using the CDN link rather than just downloading the image and rehosting it elsewhere - is searchable using the CDN URL might even theoretically be to your benefit, if you were interested in keeping tabs on where your private images have been embedded.
